@@ -58,7 +58,7 @@ func (c client) getPackageURLs() ([]string, error) {
 	return packageURLs, nil
 }
 
-func (c client) getPackageName(packageURL string) (string, error) {
+func (c client) getPackageNameFromArtifactory(packageURL string) (string, error) {
 	log.Printf("Scanning: %s\n", packageURL)
 
 	url, err := url.Parse(packageURL)
