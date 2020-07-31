@@ -6,19 +6,18 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"time"
 
 	"github.com/antchfx/xmlquery"
 )
 
-const (
-	artifacoryURL = "<artifactory-url>"
-)
-
 type client struct {
-	http            *http.Client
-	artifacoryURL   string
-	repositoriesURI string
+	http               *http.Client
+	artifacoryURL      string
+	repositoriesURI    string
+	pypiPackageInfoURL string
+	pypiEmail          string
 }
 
 type packages []struct {
@@ -27,6 +26,13 @@ type packages []struct {
 	// PackageType string `json:"packageType"`
 	// Type        string `json:"type"`
 	URL string `json:"url"`
+}
+
+type packageInfo struct {
+	Info struct {
+		Author      string `json:"author"`
+		AuthorEmail string `json:"author_email"`
+	} `json:"info"`
 }
 
 func (c client) getPackageURLs() ([]string, error) {
@@ -89,6 +95,44 @@ func (c client) getPackageNameFromArtifactory(packageURL string) (string, error)
 	return anchor.InnerText(), nil
 }
 
+func (c client) chechIfPackageIsOurs(packageName string) (bool, error) {
+	req, err := http.NewRequest("GET", fmt.Sprintf(c.pypiPackageInfoURL, packageName), nil)
+	if err != nil {
+		return false, fmt.Errorf("failed to create request: %s", err)
+	}
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("failed to get %s from PyPI: %s", packageName, err)
+	}
+	defer resp.Body.Close()
+
+	packageInfo := packageInfo{}
+	if err := json.NewDecoder(resp.Body).Decode(&packageInfo); err != nil {
+		return false, fmt.Errorf("failed to decode response from PyPI: %s", err)
+	}
+
+	return packageInfo.Info.AuthorEmail == c.pypiEmail, nil
+}
+
+func (c client) handlePackage(packageURL string, done chan<- bool, errChan chan<- error) {
+	name, err := c.getPackageNameFromArtifactory(packageURL)
+	if err != nil {
+		errChan <- fmt.Errorf("failed to get package name: %s", err)
+		return
+	}
+	log.Printf("Found package: %s", name)
+
+	ok, err := c.chechIfPackageIsOurs(name)
+	if ok {
+		// we own the package, nothig to do
+		done <- true
+		return
+	}
+
+	done <- true
+}
+
 func (c client) run() error {
 	packageURLs, err := c.getPackageURLs()
 	if err != nil {
@@ -96,23 +140,29 @@ func (c client) run() error {
 	}
 	log.Printf("Got %d packeges from artifactory\n", len(packageURLs))
 
-	// TODO: run in parallel
+	errChan := make(chan error)
+	doneChan := make(chan bool)
 	for _, url := range packageURLs {
-		name, err := c.getPackageName(url)
-		if err != nil {
-			return fmt.Errorf("failed to get package name: %s", err)
-		}
-		log.Printf("Found package: %s", name)
+		go c.handlePackage(url, doneChan, errChan)
 	}
 
+	for i := 0; i < len(packageURLs); i++ {
+		select {
+		case <-doneChan:
+		case err := <-errChan:
+			log.Println(err)
+		}
+	}
 	return nil
 }
 
 func main() {
 	client := client{
-		http:            &http.Client{Timeout: time.Second * 10},
-		artifacoryURL:   artifacoryURL,
-		repositoriesURI: "%s/artifactory/api/repositories",
+		http:               &http.Client{Timeout: time.Second * 10},
+		artifacoryURL:      os.Getenv("ARTIFACTORY_URL"),
+		repositoriesURI:    "%s/artifactory/api/repositories",
+		pypiEmail:          os.Getenv("PYPI_EMAIL"),
+		pypiPackageInfoURL: "https://pypi.org/pypi/%s/json",
 	}
 
 	if err := client.run(); err != nil {
