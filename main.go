@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/antchfx/xmlquery"
@@ -74,8 +75,8 @@ func (c client) getPackageNameFromArtifactory(packageURL string) (string, error)
 
 	// FIXME: package does not need to be in artifactory.
 	// this is a quick hack since go adds port to url twice
-	req, err := http.NewRequest(
-		"GET", fmt.Sprintf(fmt.Sprintf("%s%s/.pypi/simple.html", c.artifacoryURL, url.Path)), nil)
+	simpleAPIURL := fmt.Sprintf("%s%s/.pypi/simple.html", c.artifacoryURL, url.Path)
+	req, err := http.NewRequest("GET", fmt.Sprintf(simpleAPIURL), nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %s", err)
 	}
@@ -91,8 +92,16 @@ func (c client) getPackageNameFromArtifactory(packageURL string) (string, error)
 		return "", err
 	}
 
-	anchor := xmlquery.FindOne(doc, "//a")
-	return anchor.InnerText(), nil
+	for _, anchor := range xmlquery.Find(doc, "//a") {
+		text := anchor.InnerText()
+		requires := anchor.SelectAttr("data-requires-python")
+		// artifactory has a bug when it leaks anchor attributes to the inner
+		// text. this filters out anchors with malformed inner texts
+		if requires == "" || !strings.Contains(text, requires[1:]) {
+			return text, nil
+		}
+	}
+	return "", fmt.Errorf("no package found at %s", simpleAPIURL)
 }
 
 func (c client) chechIfPackageIsOurs(packageName string) (bool, error) {
@@ -112,7 +121,7 @@ func (c client) chechIfPackageIsOurs(packageName string) (bool, error) {
 		return false, fmt.Errorf("failed to decode response from PyPI: %s", err)
 	}
 
-	return packageInfo.Info.AuthorEmail == c.pypiEmail, nil
+	return strings.EqualFold(packageInfo.Info.AuthorEmail, c.pypiEmail), nil
 }
 
 func (c client) handlePackage(packageURL string, done chan<- bool, errChan chan<- error) {
