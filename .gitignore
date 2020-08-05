@@ -1,1 +1,4 @@
 .env
+.vscode
+.mypy_cache
+.notes.md
