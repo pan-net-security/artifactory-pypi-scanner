@@ -1,22 +1,41 @@
 package main
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
+	"crypto/md5"
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
-	"path"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/antchfx/xmlquery"
 )
+
+// PackageVersion is default version for python packages
+const PackageVersion = "0.0.0"
+const setupPy = `from setuptools import setup
+
+setup(name='%s', version='%s')
+`
+const pkgInfo = `Metadata-Version: 1.0
+Name: %s
+Version: %s
+Summary: UNKNOWN
+Home-page: UNKNOWN
+Author: UNKNOWN
+Author-email: UNKNOWN
+License: UNKNOWN
+Description: UNKNOWN
+Platform: UNKNOWN`
 
 type client struct {
 	http                 *http.Client
@@ -131,39 +150,73 @@ func (c client) chechIfPackageIsOurs(packageName string) (bool, error) {
 	return strings.EqualFold(packageInfo.Info.AuthorEmail, c.pypiEmail), nil
 }
 
+func createPackage(name string) ([]byte, error) {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tarball := tar.NewWriter(gz)
+
+	files := map[string][]byte{
+		fmt.Sprintf("%s-%s/PKG-INFO", name, PackageVersion): []byte(fmt.Sprintf(pkgInfo, name, PackageVersion)),
+		fmt.Sprintf("%s-%s/setup.py", name, PackageVersion): []byte(fmt.Sprintf(setupPy, name, PackageVersion)),
+	}
+
+	for name, content := range files {
+		header := tar.Header{
+			Name:     name,
+			Mode:     0600,
+			Size:     int64(len(content)),
+			Typeflag: tar.TypeReg,
+		}
+		if err := tarball.WriteHeader(&header); err != nil {
+			tarball.Close()
+			gz.Close()
+			return nil, fmt.Errorf("unable to tar header of %s: %s", name, err)
+		}
+		if _, err := tarball.Write(content); err != nil {
+			tarball.Close()
+			gz.Close()
+			return nil, fmt.Errorf("unable to tar content of %s: %s", name, err)
+		}
+
+	}
+
+	if err := tarball.Close(); err != nil {
+		return nil, err
+	}
+	if err := gz.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 func (c client) uploadPackage(name string) error {
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 	defer writer.Close()
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("failed to get current directory: %s", err)
-	}
-
-	filePath := path.Join(cwd, "test49-0.0.0.tar.gz")
-	file, err := os.Open(filePath)
-	if err != nil {
-		return fmt.Errorf("failed to open %s: %s", filePath, err)
-	}
-	defer file.Close()
-
-	fileWritter, err := writer.CreateFormFile("content", filepath.Base(filePath))
+	fileWritter, err := writer.CreateFormFile("content", fmt.Sprintf("%s-%s.tar.gz", name, PackageVersion))
 	if err != nil {
 		return fmt.Errorf("failed to add dist to request: %s", err)
 	}
 
-	io.Copy(fileWritter, file)
+	packageTar, err := createPackage(name)
+	if err != nil {
+		return fmt.Errorf("unable to create %s.tar.gz: %s", name, err)
+	}
+
+	if _, err := io.Copy(fileWritter, bytes.NewReader(packageTar)); err != nil {
+		return fmt.Errorf("unable to copy package tar multipart writter")
+	}
 
 	for fieldName, fieldValue := range map[string]string{
 		":action":          "file_upload",
 		"protocol_version": "1",
 		"filetype":         "sdist",
 		"pyversion":        "source",
-		"name":             "test49", //  FIXME
+		"name":             name,
 		"metadata_version": "1.0",
-		"version":          "0.0.0",
-		"md5_digest":       "61c7341b023eb649e8b0d69ac64328e9", // FIXME
+		"version":          PackageVersion,
+		"md5_digest":       fmt.Sprintf("%x", md5.Sum(packageTar)),
 	} {
 		field, err := writer.CreateFormField(fieldName)
 		if err != nil {
@@ -255,7 +308,7 @@ func main() {
 		repositoriesURI:      "%s/artifactory/api/repositories",
 		pypiEmail:            os.Getenv("PYPI_EMAIL"),
 		pypiPackageInfoURL:   "https://pypi.org/pypi/%s/json",
-		pypiPackageUploadURL: "https://test.pypi.org/legacy/", //"https://upload.pypi.org/legacy/",
+		pypiPackageUploadURL: os.Getenv("PYPI_URL"),
 		pypiToken:            os.Getenv("PYPI_TOKEN"),
 	}
 
