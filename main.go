@@ -187,7 +187,11 @@ func (c client) uploadPackage(name string) error {
 	}
 
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("Invalid response from PyPI received: %d", resp.StatusCode)
+		body, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			body = []byte("[none]")
+		}
+		return fmt.Errorf("Invalid response from PyPI received: %d. Body: %s", resp.StatusCode, body)
 	}
 	return nil
 }
