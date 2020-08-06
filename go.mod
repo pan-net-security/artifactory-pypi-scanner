@@ -4,5 +4,5 @@ go 1.14
 
 require (
 	github.com/antchfx/xmlquery v1.2.4
-	golang.org/x/net v0.0.0-20200625001655-4c5254603344 // indirect
+	golang.org/x/net v0.0.0-20200707034311-ab3426394381 // indirect
 )
