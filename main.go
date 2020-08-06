@@ -41,10 +41,12 @@ type client struct {
 	http                 *http.Client
 	artifacoryURL        string
 	repositoriesURI      string
-	pypiPackageInfoURL   string
-	pypiPackageUploadURL string
+	pypiPackageInfoURI   string
+	pypiPackageUploadURI string
 	pypiEmail            string
 	pypiToken            string
+	pypiURL              string
+}
 }
 
 type packages []struct {
@@ -131,7 +133,7 @@ func (c client) getPackageNameFromArtifactory(packageURL string) (string, error)
 }
 
 func (c client) chechIfPackageIsOurs(packageName string) (bool, error) {
-	req, err := http.NewRequest("GET", fmt.Sprintf(c.pypiPackageInfoURL, packageName), nil)
+	req, err := http.NewRequest("GET", fmt.Sprintf(c.pypiPackageInfoURI, c.pypiURL, packageName), nil)
 	if err != nil {
 		return false, fmt.Errorf("failed to create request: %s", err)
 	}
@@ -150,7 +152,7 @@ func (c client) chechIfPackageIsOurs(packageName string) (bool, error) {
 	return strings.EqualFold(packageInfo.Info.AuthorEmail, c.pypiEmail), nil
 }
 
-func createPackage(name string) ([]byte, error) {
+func (c client) createPackage(name string) ([]byte, error) {
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	tarball := tar.NewWriter(gz)
@@ -199,7 +201,7 @@ func (c client) uploadPackage(name string) error {
 		return fmt.Errorf("failed to add dist to request: %s", err)
 	}
 
-	packageTar, err := createPackage(name)
+	packageTar, err := c.createPackage(name)
 	if err != nil {
 		return fmt.Errorf("unable to create %s.tar.gz: %s", name, err)
 	}
@@ -227,9 +229,10 @@ func (c client) uploadPackage(name string) error {
 		}
 	}
 
-	req, err := http.NewRequest("POST", c.pypiPackageUploadURL, body)
+	uploadURL := fmt.Sprintf(c.pypiPackageUploadURI, c.pypiURL)
+	req, err := http.NewRequest("POST", uploadURL, body)
 	if err != nil {
-		return fmt.Errorf("failed to create request to %s: %s", c.pypiPackageUploadURL, err)
+		return fmt.Errorf("failed to create request to %s: %s", uploadURL, err)
 	}
 
 	req.Header.Add("Content-Type", writer.FormDataContentType())
@@ -306,10 +309,11 @@ func main() {
 		http:                 &http.Client{Timeout: time.Second * 10},
 		artifacoryURL:        os.Getenv("ARTIFACTORY_URL"),
 		repositoriesURI:      "%s/artifactory/api/repositories",
+		pypiURL:              os.Getenv("PYPI_URL"),
 		pypiEmail:            os.Getenv("PYPI_EMAIL"),
-		pypiPackageInfoURL:   "https://pypi.org/pypi/%s/json",
-		pypiPackageUploadURL: os.Getenv("PYPI_URL"),
 		pypiToken:            os.Getenv("PYPI_TOKEN"),
+		pypiPackageInfoURI:   "%s/pypi/%s/json",
+		pypiPackageUploadURI: "%s/legacy/",
 	}
 
 	if err := client.run(); err != nil {
