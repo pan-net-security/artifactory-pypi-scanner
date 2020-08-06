@@ -47,19 +47,29 @@ type client struct {
 	pypiToken            string
 	pypiURL              string
 }
+
+type scannerResult struct {
+	Err                 string          `json:"error"`
+	ArtifactoryPackages int             `json:"artifactoryPackages"`
+	PypiPlaceholders    int             `json:"pypiPlaceholders"`
+	IgnoredPackages     int             `json:"ignoredPackages"`
+	PackageResults      []packageResult `json:"packageResults"`
+}
+
+type packageResult struct {
+	Err     string `json:"error"`
+	Name    string `json:"name"`
+	URL     string `json:"url"`
+	IsOurs  bool   `json:"isOurs"`
+	Created bool   `json:"created"`
 }
 
 type packages []struct {
-	// Description string `json:"description"`
-	// Key         string `json:"key"`
-	// PackageType string `json:"packageType"`
-	// Type        string `json:"type"`
 	URL string `json:"url"`
 }
 
 type packageInfo struct {
 	Info struct {
-		Author      string `json:"author"`
 		AuthorEmail string `json:"author_email"`
 	} `json:"info"`
 }
@@ -149,6 +159,7 @@ func (c client) chechIfPackageIsOurs(packageName string) (bool, error) {
 		return false, fmt.Errorf("failed to decode response from PyPI: %s", err)
 	}
 
+	log.Printf("%s has '%s' as author", packageName, packageInfo.Info.AuthorEmail)
 	return strings.EqualFold(packageInfo.Info.AuthorEmail, c.pypiEmail), nil
 }
 
@@ -157,9 +168,11 @@ func (c client) createPackage(name string) ([]byte, error) {
 	gz := gzip.NewWriter(&buf)
 	tarball := tar.NewWriter(gz)
 
+	pgkInfoContent := []byte(fmt.Sprintf(pkgInfo, name, PackageVersion, c.pypiEmail))
+	setupPyContent := []byte(fmt.Sprintf(setupPy, name, PackageVersion, c.pypiEmail))
 	files := map[string][]byte{
-		fmt.Sprintf("%s-%s/PKG-INFO", name, PackageVersion): []byte(fmt.Sprintf(pkgInfo, name, PackageVersion)),
-		fmt.Sprintf("%s-%s/setup.py", name, PackageVersion): []byte(fmt.Sprintf(setupPy, name, PackageVersion)),
+		fmt.Sprintf("%s-%s/PKG-INFO", name, PackageVersion):                   pgkInfoContent,
+		fmt.Sprintf("%s-%s/setup.py", name, PackageVersion):                   setupPyContent,
 	}
 
 	for name, content := range files {
@@ -252,55 +265,69 @@ func (c client) uploadPackage(name string) error {
 	return nil
 }
 
-func (c client) handlePackage(packageURL string, done chan<- bool, errChan chan<- error) {
+func (c client) handlePackage(packageURL string, resultChan chan<- packageResult) {
+	result := packageResult{URL: packageURL}
 	name, err := c.getPackageNameFromArtifactory(packageURL)
+	result.Name = name
 	if err != nil {
-		errChan <- fmt.Errorf("failed to get package name: %s", err)
+		result.Err = fmt.Sprintf("failed to get package name: %s", err)
+		resultChan <- result
 		return
 	}
 	log.Printf("Found package: %s", name)
 
 	isOurs, err := c.chechIfPackageIsOurs(name)
-	if isOurs {
-		// We own the package, nothing to do
-		done <- true
+	result.IsOurs = isOurs
+	if err == nil {
+		// this means that package exists at PyPI, we just report the result
+		resultChan <- result
 		return
 	}
 
-	if err == nil && !isOurs {
-		// Oh no, maybe malicious package
-		errChan <- fmt.Errorf("package with unknown owner")
-		return
-	}
-
+	log.Printf("Received error from PyPI: %s. Trying to create %s package.\n", err, name)
 	if err := c.uploadPackage(name); err != nil {
-		errChan <- fmt.Errorf("unable to create package '%s': %s", name, err)
+		result.Err = fmt.Sprintf("unable to create package '%s': %s", name, err)
+		resultChan <- result
 		return
 	}
-
-	done <- true
+	result.Created = true
+	result.IsOurs = true
+	resultChan <- result
 }
 
 func (c client) run() error {
+	scannerResult := scannerResult{}
+
 	packageURLs, err := c.getPackageURLs()
 	if err != nil {
 		return fmt.Errorf("failed to get package URLs from AF: %s", err)
 	}
+	scannerResult.ArtifactoryPackages = len(packageURLs)
 	log.Printf("Got %d packeges from artifactory\n", len(packageURLs))
 
-	errChan := make(chan error)
-	doneChan := make(chan bool)
+	resultChan := make(chan packageResult)
 	for _, url := range packageURLs {
-		go c.handlePackage(url, doneChan, errChan)
+		go c.handlePackage(url, resultChan)
 	}
 
 	for i := 0; i < len(packageURLs); i++ {
 		select {
-		case <-doneChan:
-		case err := <-errChan:
-			log.Println(err)
+		case result := <-resultChan:
+			scannerResult.PackageResults = append(scannerResult.PackageResults, result)
+			if result.Err != "" {
+				log.Printf("Error handling %s: %s\n", result.URL, result.Err)
+			}
+			if result.Created || result.IsOurs {
+				scannerResult.PypiPlaceholders++
+			}
 		}
 	}
+
+	jsonResult, err := json.Marshal(scannerResult)
+	if err != nil {
+		return fmt.Errorf("unable to marshall scanner result: %s", err)
+	}
+	fmt.Printf("%s\n", jsonResult)
 	return nil
 }
 
