@@ -168,11 +168,11 @@ func (c client) createPackage(name string) ([]byte, error) {
 	gz := gzip.NewWriter(&buf)
 	tarball := tar.NewWriter(gz)
 
-	pgkInfoContent := []byte(fmt.Sprintf(pkgInfo, name, PackageVersion, c.pypiEmail))
-	setupPyContent := []byte(fmt.Sprintf(setupPy, name, PackageVersion, c.pypiEmail))
+	pgkInfoContent := []byte(fmt.Sprintf(pkgInfo, name, PackageVersion))
+	setupPyContent := []byte(fmt.Sprintf(setupPy, name, PackageVersion))
 	files := map[string][]byte{
-		fmt.Sprintf("%s-%s/PKG-INFO", name, PackageVersion):                   pgkInfoContent,
-		fmt.Sprintf("%s-%s/setup.py", name, PackageVersion):                   setupPyContent,
+		fmt.Sprintf("%s-%s/PKG-INFO", name, PackageVersion): pgkInfoContent,
+		fmt.Sprintf("%s-%s/setup.py", name, PackageVersion): setupPyContent,
 	}
 
 	for name, content := range files {
