@@ -21,10 +21,10 @@ import (
 )
 
 // PackageVersion is default version for python packages
-const PackageVersion = "0.0.0"
+const PackageVersion = "0.1.0"
 const setupPy = `from setuptools import setup
 
-setup(name='%s', version='%s')
+setup(name='%s', version='%s', author_email='%s')
 `
 const pkgInfo = `Metadata-Version: 1.0
 Name: %s
@@ -32,7 +32,7 @@ Version: %s
 Summary: UNKNOWN
 Home-page: UNKNOWN
 Author: UNKNOWN
-Author-email: UNKNOWN
+Author-email: %s
 License: UNKNOWN
 Description: UNKNOWN
 Platform: UNKNOWN`
@@ -168,11 +168,13 @@ func (c client) createPackage(name string) ([]byte, error) {
 	gz := gzip.NewWriter(&buf)
 	tarball := tar.NewWriter(gz)
 
-	pgkInfoContent := []byte(fmt.Sprintf(pkgInfo, name, PackageVersion))
-	setupPyContent := []byte(fmt.Sprintf(setupPy, name, PackageVersion))
+	pgkInfoContent := []byte(fmt.Sprintf(pkgInfo, name, PackageVersion, c.pypiEmail))
+	setupPyContent := []byte(fmt.Sprintf(setupPy, name, PackageVersion, c.pypiEmail))
+
 	files := map[string][]byte{
-		fmt.Sprintf("%s-%s/PKG-INFO", name, PackageVersion): pgkInfoContent,
-		fmt.Sprintf("%s-%s/setup.py", name, PackageVersion): setupPyContent,
+		fmt.Sprintf("%s-%s/PKG-INFO", name, PackageVersion):                   pgkInfoContent,
+		fmt.Sprintf("%s-%s/setup.py", name, PackageVersion):                   setupPyContent,
+		fmt.Sprintf("%s-%s/%s.egg-info/PKG-INFO", name, PackageVersion, name): pgkInfoContent,
 	}
 
 	for name, content := range files {
@@ -230,6 +232,7 @@ func (c client) uploadPackage(name string) error {
 		"pyversion":        "source",
 		"name":             name,
 		"metadata_version": "1.0",
+		"author_email":     c.pypiEmail,
 		"version":          PackageVersion,
 		"md5_digest":       fmt.Sprintf("%x", md5.Sum(packageTar)),
 	} {
