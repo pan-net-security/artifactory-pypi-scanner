@@ -163,9 +163,9 @@ func (c client) chechIfPackageIsOurs(packageName string) (bool, error) {
 	return strings.EqualFold(packageInfo.Info.AuthorEmail, c.pypiEmail), nil
 }
 
-func (c client) createPackage(name string) ([]byte, error) {
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
+func (c client) createPackage(name string) (*bytes.Buffer, error) {
+	var buf *bytes.Buffer
+	gz := gzip.NewWriter(buf)
 	tarball := tar.NewWriter(gz)
 
 	pgkInfoContent := []byte(fmt.Sprintf(pkgInfo, name, PackageVersion, c.pypiEmail))
@@ -203,7 +203,7 @@ func (c client) createPackage(name string) ([]byte, error) {
 	if err := gz.Close(); err != nil {
 		return nil, err
 	}
-	return buf.Bytes(), nil
+	return buf, nil
 }
 
 func (c client) uploadPackage(name string) error {
@@ -221,7 +221,7 @@ func (c client) uploadPackage(name string) error {
 		return fmt.Errorf("unable to create %s.tar.gz: %s", name, err)
 	}
 
-	if _, err := io.Copy(fileWritter, bytes.NewReader(packageTar)); err != nil {
+	if _, err := io.Copy(fileWritter, packageTar); err != nil {
 		return fmt.Errorf("unable to copy package tar multipart writter")
 	}
 
@@ -234,7 +234,7 @@ func (c client) uploadPackage(name string) error {
 		"metadata_version": "1.0",
 		"author_email":     c.pypiEmail,
 		"version":          PackageVersion,
-		"md5_digest":       fmt.Sprintf("%x", md5.Sum(packageTar)),
+		"md5_digest":       fmt.Sprintf("%x", md5.Sum(packageTar.Bytes())),
 	} {
 		field, err := writer.CreateFormField(fieldName)
 		if err != nil {
