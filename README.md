@@ -20,49 +20,51 @@ go get github.com/pan-net-security/artifactory-pypi-scanner
 `artifactory-pypi-scanner` is configured by environmental variables. All variables are mandatory.
 
 - `ARTIFACTORY_URL`
-- `PYPI_URL`
+- `PYPI_UPLOAD_URL` - used for uploading packages via [legacy](https://warehouse.readthedocs.io/api-reference/legacy/#upload-api) endpoint
+- `PYPI_URL` - used for checking presence of package via [json](https://warehouse.readthedocs.io/api-reference/json/#get--pypi--project_name--json) endpoint
 - `PYPI_EMAIL` - used for checking authors of conflicting packages
 - `PYPI_TOKEN` - API token, not a password
 
 ## Example
 
-`artifactory-pypi-scanener` outputs JSON since it is easily consumable by other services.
+`artifactory-pypi-scanner` outputs JSON since it is easily consumable by other services.
 
 ```
 $ artifactory-pypi-scanner | jq
 {
   "error": "",
-  "artifactoryPackages": 4,
-  "pypiPlaceholders": 3,
-  "ignoredPackages": 0,
-  "packageResults": [
+  "artifactoryPackages": 3,
+  "pypiPlaceholders": 2,
+  "repositoryResults": [
     {
       "error": "",
-      "name": "package1",
-      "url": "https://af.example.com/artifactory//package1-pypi-local",
-      "isOurs": false,
-      "created": false
+      "url": "https://af.example.com/artifactory//repository1-pypi-local",
+      "packageResults": [
+        {
+          "error": "",
+          "name": "package1",
+          "isOurs": false,
+          "created": false
+        }
+      ]
     },
     {
       "error": "",
-      "name": "package2",
-      "url": "https://af.example.com/artifactory//package2-pypi-local",
-      "isOurs": true,
-      "created": false
-    },
-    {
-      "error": "",
-      "name": "package3",
-      "url": "https://af.example.com/artifactory//package3-pypi-local",
-      "isOurs": true,
-      "created": true
-    },
-    {
-      "error": "",
-      "name": "package4",
-      "url": "https://af.example.com/artifactory//package4-pypi-local",
-      "isOurs": true,
-      "created": true
+      "url": "https://af.example.com/artifactory//repository2-pypi-local",
+      "packageResults": [
+        {
+          "error": "",
+          "name": "package2",
+          "isOurs": true,
+          "created": false
+        },
+        {
+          "error": "",
+          "name": "package3",
+          "isOurs": true,
+          "created": true
+        }
+      ]
     }
   ]
 }
