@@ -21,7 +21,7 @@ import (
 )
 
 // PackageVersion is default version for python packages
-const PackageVersion = "0.1.0"
+const PackageVersion = "0.0.47"
 const setupPy = `from setuptools import setup
 
 setup(name='%s', version='%s', author_email='%s')
@@ -50,17 +50,21 @@ type client struct {
 }
 
 type scannerResult struct {
-	Err                 string          `json:"error"`
-	ArtifactoryPackages int             `json:"artifactoryPackages"`
-	PypiPlaceholders    int             `json:"pypiPlaceholders"`
-	IgnoredPackages     int             `json:"ignoredPackages"`
-	PackageResults      []packageResult `json:"packageResults"`
+	Err                 string             `json:"error"`
+	ArtifactoryPackages int                `json:"artifactoryPackages"`
+	PypiPlaceholders    int                `json:"pypiPlaceholders"`
+	RepositoryResults   []repositoryResult `json:"repositoryResults"`
+}
+
+type repositoryResult struct {
+	Err            string          `json:"error"`
+	URL            string          `json:"url"`
+	PackageResults []packageResult `json:"packageResults"`
 }
 
 type packageResult struct {
 	Err     string `json:"error"`
 	Name    string `json:"name"`
-	URL     string `json:"url"`
 	IsOurs  bool   `json:"isOurs"`
 	Created bool   `json:"created"`
 }
@@ -75,7 +79,7 @@ type packageInfo struct {
 	} `json:"info"`
 }
 
-func (c client) getPackageURLs() ([]string, error) {
+func (c client) getRepositoryURLs() ([]string, error) {
 	params := url.Values{}
 	params.Add("type", "local")
 	params.Add("packageType", "pypi")
@@ -97,19 +101,20 @@ func (c client) getPackageURLs() ([]string, error) {
 		return nil, fmt.Errorf("failed to decode response: %s", err)
 	}
 
-	var packageURLs []string
+	var repositoryURLs []string
 	for _, item := range packages {
-		packageURLs = append(packageURLs, item.URL)
+		repositoryURLs = append(repositoryURLs, item.URL)
 	}
-	return packageURLs, nil
+	return repositoryURLs, nil
 }
 
-func (c client) getPackageNameFromArtifactory(packageURL string) (string, error) {
-	log.Printf("Scanning: %s\n", packageURL)
+func (c client) getPackageNamesFromArtifactory(repositoryURL string) ([]string, error) {
+	log.Printf("Scanning: %s\n", repositoryURL)
+	var packages []string
 
-	url, err := url.Parse(packageURL)
+	url, err := url.Parse(repositoryURL)
 	if err != nil {
-		return "", fmt.Errorf("invalid package url: %s", err)
+		return nil, fmt.Errorf("invalid package url: %s", err)
 	}
 
 	// FIXME: package does not need to be in artifactory.
@@ -117,18 +122,18 @@ func (c client) getPackageNameFromArtifactory(packageURL string) (string, error)
 	simpleAPIURL := fmt.Sprintf("%s%s/.pypi/simple.html", c.artifacoryURL, url.Path)
 	req, err := http.NewRequest("GET", fmt.Sprintf(simpleAPIURL), nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to create request: %s", err)
+		return nil, fmt.Errorf("failed to create request: %s", err)
 	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("failed to send request: %s", err)
+		return nil, fmt.Errorf("failed to send request: %s", err)
 	}
 	defer resp.Body.Close()
 
 	doc, err := xmlquery.Parse(resp.Body)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	for _, anchor := range xmlquery.Find(doc, "//a") {
@@ -137,10 +142,15 @@ func (c client) getPackageNameFromArtifactory(packageURL string) (string, error)
 		// artifactory has a bug when it leaks anchor attributes to the inner
 		// text. this filters out anchors with malformed inner texts
 		if requires == "" || !strings.Contains(text, requires[1:]) {
-			return text, nil
+			packages = append(packages, text)
 		}
 	}
-	return "", fmt.Errorf("no package found at %s", simpleAPIURL)
+
+	if len(packages) == 0 {
+		return nil, fmt.Errorf("no package found at %s", simpleAPIURL)
+	}
+
+	return packages, nil
 }
 
 func (c client) chechIfPackageIsOurs(packageName string) (bool, error) {
@@ -269,16 +279,8 @@ func (c client) uploadPackage(name string) error {
 	return nil
 }
 
-func (c client) handlePackage(packageURL string, resultChan chan<- packageResult) {
-	result := packageResult{URL: packageURL}
-	name, err := c.getPackageNameFromArtifactory(packageURL)
-	result.Name = name
-	if err != nil {
-		result.Err = fmt.Sprintf("failed to get package name: %s", err)
-		resultChan <- result
-		return
-	}
-	log.Printf("Found package: %s", name)
+func (c client) handlePackage(name string, resultChan chan<- packageResult) {
+	result := packageResult{Name: name}
 
 	isOurs, err := c.chechIfPackageIsOurs(name)
 	result.IsOurs = isOurs
@@ -299,30 +301,60 @@ func (c client) handlePackage(packageURL string, resultChan chan<- packageResult
 	resultChan <- result
 }
 
+func (c client) handleRepository(repositoryURL string, resultChan chan<- repositoryResult) {
+	log.Printf("Handling %s repository\n", repositoryURL)
+	result := repositoryResult{URL: repositoryURL}
+	names, err := c.getPackageNamesFromArtifactory(repositoryURL)
+	if err != nil {
+		result.Err = fmt.Sprintf("failed to get package name: %s", err)
+		resultChan <- result
+		return
+	}
+
+	packageResultChan := make(chan packageResult)
+	for _, name := range names {
+		log.Printf("Handling package: %s", name)
+		go c.handlePackage(name, packageResultChan)
+	}
+
+	for i := 0; i < len(names); i++ {
+		select {
+		case packageResult := <-packageResultChan:
+			result.PackageResults = append(result.PackageResults, packageResult)
+			log.Printf("Got result from package: %s", packageResult.Name)
+		}
+	}
+	resultChan <- result
+}
+
 func (c client) run() error {
 	scannerResult := scannerResult{}
 
-	packageURLs, err := c.getPackageURLs()
+	repositoryURLs, err := c.getRepositoryURLs()
 	if err != nil {
 		return fmt.Errorf("failed to get package URLs from AF: %s", err)
 	}
-	scannerResult.ArtifactoryPackages = len(packageURLs)
-	log.Printf("Got %d packeges from artifactory\n", len(packageURLs))
 
-	resultChan := make(chan packageResult)
-	for _, url := range packageURLs {
-		go c.handlePackage(url, resultChan)
+	log.Printf("Got %d repositories from artifactory\n", len(repositoryURLs))
+
+	resultChan := make(chan repositoryResult)
+	for _, url := range repositoryURLs {
+		go c.handleRepository(url, resultChan)
 	}
 
-	for i := 0; i < len(packageURLs); i++ {
+	for i := 0; i < len(repositoryURLs); i++ {
 		select {
 		case result := <-resultChan:
-			scannerResult.PackageResults = append(scannerResult.PackageResults, result)
+			scannerResult.RepositoryResults = append(scannerResult.RepositoryResults, result)
 			if result.Err != "" {
 				log.Printf("Error handling %s: %s\n", result.URL, result.Err)
 			}
-			if result.Created || result.IsOurs {
-				scannerResult.PypiPlaceholders++
+			log.Printf("Successfully handled %s repository\n", result.URL)
+			for _, r := range result.PackageResults {
+				scannerResult.ArtifactoryPackages++
+				if r.Created || r.IsOurs {
+					scannerResult.PypiPlaceholders++
+				}
 			}
 		}
 	}
