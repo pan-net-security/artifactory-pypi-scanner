@@ -46,6 +46,7 @@ type client struct {
 	pypiEmail            string
 	pypiToken            string
 	pypiURL              string
+	pypiUploadURL        string
 }
 
 type scannerResult struct {
@@ -245,7 +246,7 @@ func (c client) uploadPackage(name string) error {
 		}
 	}
 
-	uploadURL := fmt.Sprintf(c.pypiPackageUploadURI, c.pypiURL)
+	uploadURL := fmt.Sprintf(c.pypiPackageUploadURI, c.pypiUploadURL)
 	req, err := http.NewRequest("POST", uploadURL, body)
 	if err != nil {
 		return fmt.Errorf("failed to create request to %s: %s", uploadURL, err)
@@ -340,6 +341,7 @@ func main() {
 		artifacoryURL:        os.Getenv("ARTIFACTORY_URL"),
 		repositoriesURI:      "%s/artifactory/api/repositories",
 		pypiURL:              os.Getenv("PYPI_URL"),
+		pypiUploadURL:        os.Getenv("PYPI_UPLOAD_URL"),
 		pypiEmail:            os.Getenv("PYPI_EMAIL"),
 		pypiToken:            os.Getenv("PYPI_TOKEN"),
 		pypiPackageInfoURI:   "%s/pypi/%s/json",
