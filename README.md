@@ -1,4 +1,5 @@
 # Artifactory PyPI Scanner
+[![Go Report Card](https://goreportcard.com/badge/github.com/pan-net-security/artifactory-pypi-scanner)](https://goreportcard.com/report/github.com/pan-net-security/artifactory-pypi-scanner) [![Build Status](https://github.com/pan-net-security/artifactory-pypi-scanner/workflows/Build%20and%20lint/badge.svg?branch=master&event=push)](https://github.com/pan-net-security/artifactory-pypi-scanner/actions?query=workflow%3A%22Build+and+lint%22)
 
 `artifactory-pypi-scanner` lists all Python packages in a [jfrog artifactory](https://jfrog.com/artifactory/) instance. Checks whether they're present on [PyPI](https://pypi.org/) and creates new ones with the same name if they do not exist on PyPI.
 
