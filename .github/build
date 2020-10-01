@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+
+go get github.com/mitchellh/gox
+gox -output "artifactory-pypi-scanner_{{.OS}}_{{.Arch}}"
+for file in artifactory-pypi-scanner*; do
+    sha256sum "$file" > "${file}.sha256sum"
+done
