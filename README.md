@@ -7,11 +7,16 @@
 
 When `pip` searches for packages, it searches PyPI first and other repositories next. This creates a security issue which was described [here](https://github.com/pypa/pip/issues/8606). Let's say we have a package in an internal repository. Someone can upload a package containing malicious code with the same name to PyPI. When downloading the package users will download the malicious package. To prevent this package injection we create a placeholder on PyPI.
 
+### OK, but haven't I just performed a package injection on myself?
+
+Well yes, actually but no. If the package version is not specified, `pip` tries to get the latest version possible. By creating a package with a low enough version (`0.0.47`) on PyPI, we make sure that `pip` downloads the package from internal repositories.
+
 > Be nice and prefix your package name with, e.g. name of your organization, not to clutter PyPI
 
 
 ## Installation
 
+You can build it from source or download pre-build binaries from [releases](https://github.com/pan-net-security/artifactory-pypi-scanner/releases).
 ```sh
 go get github.com/pan-net-security/artifactory-pypi-scanner
 ```
