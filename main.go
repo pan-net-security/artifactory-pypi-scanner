@@ -117,9 +117,7 @@ func (c client) getPackageNamesFromArtifactory(repositoryURL string) ([]string, 
 		return nil, fmt.Errorf("invalid package url: %s", err)
 	}
 
-	// FIXME: package does not need to be in artifactory.
-	// this is a quick hack since go adds port to url twice
-	simpleAPIURL := fmt.Sprintf("%s%s/.pypi/simple.html", c.artifacoryURL, url.Path)
+	simpleAPIURL := fmt.Sprintf("%s://%s%s/.pypi/simple.html", url.Scheme, url.Hostname(), url.Path)
 	req, err := http.NewRequest("GET", fmt.Sprintf(simpleAPIURL), nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %s", err)
