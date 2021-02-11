@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/antchfx/xmlquery"
+	"github.com/PuerkitoBio/goquery"
 )
 
 // PackageVersion is default version for python packages
@@ -129,20 +129,20 @@ func (c client) getPackageNamesFromArtifactory(repositoryURL string) ([]string, 
 	}
 	defer resp.Body.Close()
 
-	doc, err := xmlquery.Parse(resp.Body)
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to parse document: %s", err)
 	}
 
-	for _, anchor := range xmlquery.Find(doc, "//a") {
-		text := anchor.InnerText()
-		requires := anchor.SelectAttr("data-requires-python")
+	doc.Find("a").Each(func(i int, s *goquery.Selection) {
+		text := s.Text()
+		requires, exists := s.Attr("data-requires-python")
 		// artifactory has a bug when it leaks anchor attributes to the inner
 		// text. this filters out anchors with malformed inner texts
-		if requires == "" || !strings.Contains(text, requires[1:]) {
+		if !exists || requires == "" || !strings.Contains(text, requires[1:]) {
 			packages = append(packages, text)
 		}
-	}
+	})
 
 	if len(packages) == 0 {
 		return nil, fmt.Errorf("no package found at %s", simpleAPIURL)
